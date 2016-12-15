@@ -1455,8 +1455,7 @@ void _VulkanRenderer_Impl::createGraphicsCommandBuffers()
 				vkCmdDrawIndexed(command_buffers[i], part.index_count, 1, 0, 0, 0);
 			}
 			vkCmdEndRenderPass(command_buffers[i]);
-			utility.recordTransitImageLayout(command_buffers[i], pre_pass_depth_image.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-
+		
 		}
 
 		auto record_result = vkEndCommandBuffer(command_buffers[i]);
@@ -1776,6 +1775,7 @@ void _VulkanRenderer_Impl::updateUniformBuffers(float deltatime)
 	auto current_time = std::chrono::high_resolution_clock::now();
 	float time = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count() / 1000.0f;
 
+	vkDeviceWaitIdle(device);
 	// update camera ubo
 	{
 		CameraUbo ubo = {};
@@ -1797,7 +1797,7 @@ void _VulkanRenderer_Impl::updateUniformBuffers(float deltatime)
 	// update light ubo
 	{
 		auto light_num = static_cast<int>(pointlights.size());
-		VkDeviceSize bufferSize = sizeof(PointLight) * MAX_POINT_LIGHT_COUNT + sizeof(int);
+		VkDeviceSize bufferSize = sizeof(PointLight) * MAX_POINT_LIGHT_COUNT + sizeof(glm::vec4);
 
 		for (int i = 0; i < light_num; i++) {
 			pointlights[i].pos += glm::vec3(0, 3.0f, 0) * deltatime;
@@ -1838,43 +1838,13 @@ void _VulkanRenderer_Impl::drawFrame()
 		}
 	}
 
-	// submit depth pre-pass command buffer
-	{
-		vk::SubmitInfo submit_info = {
-			0, // waitSemaphoreCount
-			nullptr, // pWaitSemaphores
-			nullptr, // pwaitDstStageMask
-			1, // commandBufferCount
-			&depth_prepass_command_buffer, // pCommandBuffers
-			1, // singalSemaphoreCount
-			depth_prepass_finished_semaphore.data() // pSingalSemaphores
-		};
-		graphics_queue.submit(1, &submit_info, VK_NULL_HANDLE);
-	}
-
-	// submit light culling command buffer
-	{
-		vk::Semaphore wait_semaphores[] = { depth_prepass_finished_semaphore.get() }; // which semaphore to wait
-		vk::PipelineStageFlags wait_stages[] = { vk::PipelineStageFlagBits::eComputeShader }; // which stage to execute
-		vk::SubmitInfo submit_info = {
-			1, // waitSemaphoreCount
-			wait_semaphores, // pWaitSemaphores
-			wait_stages, // pwaitDstStageMask
-			1, // commandBufferCount
-			&light_culling_command_buffer, // pCommandBuffers
-			1, // singalSemaphoreCount
-			lightculling_completed_semaphore.data() // pSingalSemaphores
-		};
-		compute_queue.submit(1, &submit_info, VK_NULL_HANDLE);
-	}
-
 	// 2. Submitting the command buffer
 	{
 		VkSubmitInfo submit_info = {};
 		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		VkSemaphore wait_semaphores[] = { image_available_semaphore.get() , lightculling_completed_semaphore.get() }; // which semaphore to wait
-		VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT }; // which stage to execute
-		submit_info.waitSemaphoreCount = 2;
+		VkSemaphore wait_semaphores[] = { image_available_semaphore.get()  }; // which semaphore to wait
+		VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT }; // which stage to execute
+		submit_info.waitSemaphoreCount = 1;
 		submit_info.pWaitSemaphores = wait_semaphores;
 		submit_info.pWaitDstStageMask = wait_stages;
 		submit_info.commandBufferCount = 1;
